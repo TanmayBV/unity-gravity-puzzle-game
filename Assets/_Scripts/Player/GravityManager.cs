@@ -17,28 +17,33 @@ public class GravityManager : MonoBehaviour
 
     void Update()
     {
-        HandleInput();
+        HandleInput(); 
     }
 
+    //HANDLE HOLLOW 
     void HandleInput()
     {
-        Transform t = player.transform;
+        Vector3 up = player.transform.up;
 
-        // 🔥 Flatten directions relative to surface
-        Vector3 forward = Vector3.ProjectOnPlane(t.forward, player.transform.up).normalized;
-        Vector3 right = Vector3.ProjectOnPlane(t.right, player.transform.up).normalized;
+        //CAMERA RELATIVE DIRECTIONS
+        Vector3 camForward = Vector3.ProjectOnPlane(Camera.main.transform.forward, up).normalized;
+        Vector3 camRight = Vector3.ProjectOnPlane(Camera.main.transform.right, up).normalized;
+
+        // SNAP TO 4 DIRECTIONS
+        camForward = GetSnappedDirection(camForward);
+        camRight = GetSnappedDirection(camRight);
 
         if (Input.GetKeyDown(KeyCode.UpArrow))
-            selectedDirection = forward;
+            selectedDirection = camForward;
 
         if (Input.GetKeyDown(KeyCode.DownArrow))
-            selectedDirection = -forward;
+            selectedDirection = -camForward;
 
         if (Input.GetKeyDown(KeyCode.LeftArrow))
-            selectedDirection = -right;
+            selectedDirection = -camRight;
 
         if (Input.GetKeyDown(KeyCode.RightArrow))
-            selectedDirection = right;
+            selectedDirection = camRight;
 
         if (selectedDirection != Vector3.zero)
         {
@@ -51,62 +56,112 @@ public class GravityManager : MonoBehaviour
         }
     }
 
+    Vector3 GetSnappedDirection(Vector3 dir)
+    {
+        dir.Normalize();
 
-    // 🔥 HOLOGRAM PREVIEW
+        float x = Mathf.Round(dir.x);
+        float y = Mathf.Round(dir.y);
+        float z = Mathf.Round(dir.z);
+
+        return new Vector3(x, y, z).normalized;
+    }
+
+
+
+    // HOLOGRAM PREVIEW
     void ShowPreview()
     {
         hologram.gameObject.SetActive(true);
 
-        // 👉 slightly above player
         targetPosition =  player.transform.position + player.transform.up * previewHeight;
 
-        // 👉 calculate final rotation
-        targetRotation =
-            Quaternion.FromToRotation(player.transform.up, -selectedDirection) *
-            player.transform.rotation;
+        Vector3 newUp = -selectedDirection;
+
+        Vector3 forward = Vector3.ProjectOnPlane(player.transform.forward, newUp).normalized;
+
+        if (forward.sqrMagnitude < 0.001f)
+            forward = Vector3.Cross(player.transform.right, newUp);
+
+        targetRotation = Quaternion.LookRotation(forward, newUp);
+
 
         hologram.position = targetPosition;
         hologram.rotation = targetRotation;
     }
 
-    // 🔥 SMOOTH TRANSITION
+    // SMOOTH TRANSITION
     IEnumerator ApplyGravitySmooth()
     {
-        player.isGravityOn = false;
         if (selectedDirection == Vector3.zero)
             yield break;
 
         player.EnableControl(false);
+        player.isGravityOn = false;
 
-        float t = 0f;
-        float speed = 5f;
+        player.rb.linearVelocity = Vector3.zero;
+        player.rb.isKinematic = true;
 
         Vector3 startPos = player.transform.position;
         Quaternion startRot = player.transform.rotation;
 
-        // 🔥 TAKE TARGET FROM HOLOGRAM
-        Vector3 targetPos = hologram.position;
+        Vector3 liftPos = startPos + player.transform.up * 1.0f;
         Quaternion targetRot = hologram.rotation;
+        Vector3 targetPos = hologram.position;
 
+        yield return new WaitForSeconds(.3f);
+
+        float t;
+
+        //LIFT
+        t = 0;
         while (t < 1f)
         {
-            t += Time.deltaTime * speed;
+            t += Time.deltaTime * moveSpeed;
+            float smoothT = Mathf.SmoothStep(0, 1, t);
 
-            player.transform.position = Vector3.Lerp(startPos, targetPos, t);
-            player.transform.rotation = Quaternion.Slerp(startRot, targetRot, t);
+            player.transform.position = Vector3.Lerp(startPos, liftPos, smoothT);
 
             yield return null;
         }
 
-        // 🔥 Apply gravity AFTER reaching hologram
-        player.SetGravity(selectedDirection);
+        //ROTATE
+        t = 0;
+        while (t < 1f)
+        {
+            t += Time.deltaTime * moveSpeed;
+            float smoothT = Mathf.SmoothStep(0, 1, t);
 
+            player.transform.rotation = Quaternion.Slerp(startRot, targetRot, smoothT);
+
+            yield return null;
+        }
+
+        // MOVE
+        t = 0;
+        while (t < 1f)
+        {
+            t += Time.deltaTime * moveSpeed;
+            float smoothT = Mathf.SmoothStep(0, 1, t);
+
+            player.transform.position = Vector3.Lerp(liftPos, targetPos, smoothT);
+
+            yield return null;
+        }
+
+        //APPLY GRAVITY
+        player.SetGravity(selectedDirection);
+        player.AlignToGravityStraight();
+
+        player.rb.isKinematic = false;
+        player.isGravityOn = true;
         player.EnableControl(true);
 
         hologram.gameObject.SetActive(false);
         selectedDirection = Vector3.zero;
-
-        player.isGravityOn = true;
+        
     }
+
+
 
 }

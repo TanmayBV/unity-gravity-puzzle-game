@@ -31,6 +31,7 @@ public class ThirdPersonCamera : MonoBehaviour
         HandleCamera();
     }
 
+    //ROTATION
     void HandleRotation()
     {
         mouseX += Input.GetAxis("Mouse X") * rotationSpeed * 100f * Time.deltaTime;
@@ -39,6 +40,7 @@ public class ThirdPersonCamera : MonoBehaviour
         mouseY = Mathf.Clamp(mouseY, -40f, 80f);
     }
 
+    //CAMERA MOVEMENT
     void HandleCamera()
     {
         // Align with player gravity
@@ -64,6 +66,6 @@ public class ThirdPersonCamera : MonoBehaviour
 
         transform.position = Vector3.Lerp(transform.position, finalPosition, smoothSpeed * Time.deltaTime);
 
-        transform.LookAt(targetPosition, player.up); // 🔥 IMPORTANT FIX
+        transform.LookAt(targetPosition, player.up);
     }
 }

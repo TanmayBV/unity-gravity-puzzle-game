@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using UnityEngine.UIElements;
 
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerController : MonoBehaviour
@@ -6,7 +7,7 @@ public class PlayerController : MonoBehaviour
     [Header("References")]
     public Transform cameraTransform;
 
-    private Rigidbody rb;
+    public Rigidbody rb;
     private Animator anim;
 
     [Header("Movement")]
@@ -19,7 +20,7 @@ public class PlayerController : MonoBehaviour
     [Header("Gravity")]
     public float gravityStrength = 20f;
     private Vector3 gravityDirection = Vector3.down;
-    public bool isGravityOn = true;
+    public bool isGravityOn;
 
     [Header("Ground Check")]
     public float groundCheckDistance = 0.6f;
@@ -27,9 +28,10 @@ public class PlayerController : MonoBehaviour
     public LayerMask groundLayer;
 
     [Header("Ground Settings")]
-    public float coyoteTime = 0.15f; // small delay before falling
+    public float coyoteTime = 0.15f; 
     public float maxSlopeAngle = 60f;
 
+    [SerializeField]
     private bool isGrounded;
     private bool wasGrounded;
 
@@ -48,6 +50,8 @@ public class PlayerController : MonoBehaviour
 
         rb.useGravity = false;
         rb.constraints = RigidbodyConstraints.FreezeRotation;
+
+        isGravityOn = true;
     }
 
     void FixedUpdate()
@@ -69,16 +73,17 @@ public class PlayerController : MonoBehaviour
         canControl = value;
     }
 
-    // ✅ GROUND CHECK
+    // GROUND CHECK
     void CheckGround()
     {
-        Vector3 origin = transform.position + transform.up * 0.1f;
+        Vector3 origin = transform.position + transform.up * 0.4f; 
 
         RaycastHit hit;
+
         bool hitGround = Physics.SphereCast(
             origin,
             groundCheckRadius,
-            gravityDirection,
+            -transform.up,
             out hit,
             groundCheckDistance,
             groundLayer
@@ -88,47 +93,37 @@ public class PlayerController : MonoBehaviour
 
         if (hitGround)
         {
-            isGrounded = true;
-            groundNormal = hit.normal;
+            float slopeAngle = Vector3.Angle(hit.normal, transform.up);
+
+            if (slopeAngle <= maxSlopeAngle)
+            {
+                isGrounded = true;
+                groundNormal = hit.normal;
+                lastGroundedTime = Time.time;
+            }
         }
         else
         {
-            isGrounded = false;
+            //prevents flicker
+            if (Time.time - lastGroundedTime > coyoteTime)
+            {
+                isGrounded = false;
+            }
         }
 
-        // 🔥 LANDING DETECTED
+        //LAND
         if (!wasGrounded && isGrounded)
         {
-            AlignToGroundInstant();
+            AlignToGravityStraight();
         }
 
-        HandleGroundAnimation();
+        float verticalSpeed = Vector3.Dot(rb.linearVelocity, gravityDirection);
+
+        bool isFallingNow = !isGrounded && verticalSpeed > 0.1f;
+
+        anim.SetBool("isFalling", isFallingNow);
     }
-
-
-    void HandleGroundAnimation()
-    {
-        bool isFalling = !isGrounded && rb.linearVelocity.magnitude > 0.5f;
-
-        anim.SetBool("isFalling", isFalling);
-
-        // Optional: landing trigger
-        if (isGrounded && rb.linearVelocity.magnitude < 0.2f)
-        {
-            anim.SetTrigger("land");
-        }
-    }
-
-    void AlignToGroundInstant()
-    {
-        Quaternion targetRotation =
-            Quaternion.FromToRotation(transform.up, groundNormal) * transform.rotation;
-
-        transform.rotation = targetRotation;
-    }
-
-
-    // 🎮 MOVEMENT
+    // MOVEMENT
     void HandleMovement()
     {
         float h = Input.GetAxis("Horizontal");
@@ -147,7 +142,7 @@ public class PlayerController : MonoBehaviour
         rb.AddForce(velocityChange, ForceMode.VelocityChange);
 
         bool isMoving = move.magnitude > 0.1f;
-        anim.SetBool("isRunning", isGrounded);
+        anim.SetBool("isRunning", isMoving && isGrounded);
 
         if (isMoving)
         {
@@ -164,20 +159,23 @@ public class PlayerController : MonoBehaviour
         if (isGrounded && Input.GetKeyDown(KeyCode.Space))
         {
             rb.AddForce(-gravityDirection * jumpForce, ForceMode.Impulse);
-            anim.SetTrigger("jump");
+            isGrounded = false;
+            //anim.SetTrigger("jump");
         }
     }
 
-    // 🧲 CUSTOM GRAVITY
+    // CUSTOM GRAVITY
     void ApplyGravity()
     {
         if(isGravityOn)
-        rb.AddForce(gravityDirection * gravityStrength, ForceMode.Acceleration);
+            rb.AddForce(gravityDirection * gravityStrength, ForceMode.Acceleration);
     }
 
-    // 🔄 ALIGN PLAYER
+    //ALIGN PLAYER
     void AlignWithGravity()
     {
+        if (!canControl) return; 
+
         Quaternion targetRotation =
             Quaternion.FromToRotation(transform.up, -gravityDirection) * transform.rotation;
 
@@ -188,18 +186,42 @@ public class PlayerController : MonoBehaviour
         );
     }
 
-    // 🌍 EXTERNAL CALL
+    public void AlignToGravityStraight()
+    {
+        Vector3 up = -gravityDirection;
+
+        // Project forward onto plane to remove tilt
+        Vector3 forward = Vector3.ProjectOnPlane(transform.forward, up).normalized;
+
+        if (forward.sqrMagnitude < 0.001f)
+            forward = Vector3.Cross(transform.right, up);
+
+        Quaternion targetRotation = Quaternion.LookRotation(forward, up);
+
+        transform.rotation = targetRotation;
+    }
+
+
+    //CUSTOM GRAVITY 
     public void SetGravity(Vector3 newGravityDirection)
     {
         gravityDirection = newGravityDirection.normalized;
 
-        rb.linearVelocity = Vector3.zero; // for Rigidbody
     }
 
     // DEBUG
     void OnDrawGizmos()
     {
         Gizmos.color = Color.blue;
-        Gizmos.DrawLine(transform.position, transform.position + gravityDirection * 2f);
+        Gizmos.DrawSphere(transform.position + transform.up * .1f , groundCheckRadius);
+    }
+
+    //INTERACTION
+    private void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("Points"))
+        {
+            other.gameObject.GetComponent<IInteractable>().Interact();
+        }
     }
 }
